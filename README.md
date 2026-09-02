@@ -1,5 +1,6 @@
 # 🎵 VisuChord — Instrumento Musical por Visão Computacional & Gestos
 
+[![CI Pipeline](https://github.com/felipegardenghidev/visuchord/actions/workflows/ci.yml/badge.svg)](https://github.com/felipegardenghidev/visuchord/actions)
 ![Vite](https://img.shields.io/badge/Vite-8.2-646CFF?style=flat-square&logo=vite)
 ![React](https://img.shields.io/badge/React-19-blue?style=flat-square&logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?style=flat-square&logo=typescript)
