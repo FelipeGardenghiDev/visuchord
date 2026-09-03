@@ -107,7 +107,7 @@ export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({ isOpen, on
                 <span className="font-bold text-purple-400 font-mono text-sm">Maior (Maj)</span>
               </div>
               <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">✌️ 2 Dedos (Paz & Amor)</span>
+                <span className="font-semibold text-slate-300">✌️ 2 Dedos (Paz &amp; Amor)</span>
                 <span className="font-bold text-purple-400 font-mono text-sm">Menor (m)</span>
               </div>
               <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
@@ -115,8 +115,16 @@ export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({ isOpen, on
                 <span className="font-bold text-purple-400 font-mono text-sm">Dominante (7)</span>
               </div>
               <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🤟 4 Dedos levantados</span>
+                <span className="font-semibold text-slate-300">🖖 4 Dedos levantados</span>
                 <span className="font-bold text-purple-400 font-mono text-sm">Sétima Maior (7M)</span>
+              </div>
+              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
+                <span className="font-semibold text-slate-300">🤟 3 Dedos levantados</span>
+                <span className="font-bold text-purple-400 font-mono text-sm">Menor com 7ª (m7)</span>
+              </div>
+              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
+                <span className="font-semibold text-slate-300">🤘 Horns (Indicador + Mínimo)</span>
+                <span className="font-bold text-purple-400 font-mono text-sm">Suspenso 4 (sus4)</span>
               </div>
               <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
                 <span className="font-semibold text-slate-300">👌 Pinch (Polegar + Indicador)</span>
@@ -128,11 +136,14 @@ export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({ isOpen, on
               </div>
             </div>
 
-            {/* Como Tocar */}
-            <div className="mt-4 pt-3 border-t border-slate-800">
-              <p className="text-xs font-bold text-purple-300 mb-2">⚡ Como disparar o som (Strumming):</p>
+            {/* Modos de Execução */}
+            <div className="mt-4 pt-3 border-t border-slate-800 space-y-2">
+              <p className="text-xs font-bold text-purple-300">⚡ Modos de Execução Sonora:</p>
               <div className="p-2.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-200 text-xs">
-                Faça um movimento rápido de <strong>descida com a mão direita no ar</strong> (como se estivesse palhetando um violão ou harpa invisível). O acorde soará dedilhado com reverberação!
+                <strong>Modo Palhetada:</strong> Faça um movimento rápido de <strong>descida com a mão direita no ar</strong> para dedilhar o acorde como um violão.
+              </div>
+              <div className="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 text-xs">
+                <strong>Modo Sustentação:</strong> O acorde soa continuamente como um <strong>teclado/pad espacial</strong> enquanto ambas as mãos estiverem erguidas.
               </div>
             </div>
           </div>

@@ -7,9 +7,11 @@ class SoundEngine {
   private polySynth: Tone.PolySynth | null = null;
   private reverb: Tone.Reverb | null = null;
   private chorus: Tone.Chorus | null = null;
+  private limiter: Tone.Limiter | null = null;
   private volumeNode: Tone.Volume | null = null;
   private activePreset: InstrumentPreset = 'warmPad';
   private currentlyPlayingNotes: string[] = [];
+  private sustainedNotes: string[] = [];
 
   /**
    * Inicializa o contexto de áudio do navegador
@@ -19,13 +21,15 @@ class SoundEngine {
 
     await Tone.start();
 
-    // Cria os nós de efeito
+    // Cria os nós de efeito e proteção contra distorção (Limiter)
     this.volumeNode = new Tone.Volume(-6).toDestination();
+    this.limiter = new Tone.Limiter(-1).connect(this.volumeNode);
+
     this.reverb = new Tone.Reverb({
       decay: 3.5,
       preDelay: 0.05,
       wet: 0.35,
-    }).connect(this.volumeNode);
+    }).connect(this.limiter);
 
     this.chorus = new Tone.Chorus({
       frequency: 1.5,
@@ -84,6 +88,56 @@ class SoundEngine {
     } catch (err) {
       console.warn('Erro ao dedilhar acorde:', err);
     }
+  }
+
+  /**
+   * Mantém o acorde sustentado continuamente com condução suave de vozes (Voice Leading)
+   */
+  public setSustainedChord(notes: string[]): void {
+    if (!this.isInitialized || !this.polySynth) return;
+
+    // Se as notas forem exatamente as mesmas, não faz nada para evitar re-ataque brusco
+    const areEqual =
+      this.sustainedNotes.length === notes.length &&
+      this.sustainedNotes.every((n, i) => n === notes[i]);
+    if (areEqual) return;
+
+    try {
+      const notesToRelease = this.sustainedNotes.filter((n) => !notes.includes(n));
+      const notesToAttack = notes.filter((n) => !this.sustainedNotes.includes(n));
+
+      if (notesToRelease.length > 0) {
+        this.polySynth.triggerRelease(notesToRelease);
+      }
+      if (notesToAttack.length > 0) {
+        this.polySynth.triggerAttack(notesToAttack);
+      }
+
+      this.sustainedNotes = [...notes];
+      this.currentlyPlayingNotes = [...notes];
+    } catch (err) {
+      console.warn('Erro ao sustentar acorde:', err);
+    }
+  }
+
+  /**
+   * Encerra a sustentação de qualquer acorde ativo
+   */
+  public stopSustainedChord(): void {
+    if (!this.isInitialized || !this.polySynth) return;
+    if (this.sustainedNotes.length === 0) return;
+
+    try {
+      this.polySynth.releaseAll();
+      this.sustainedNotes = [];
+      this.currentlyPlayingNotes = [];
+    } catch (err) {
+      console.warn('Erro ao parar sustentação:', err);
+    }
+  }
+
+  public isSustaining(): boolean {
+    return this.sustainedNotes.length > 0;
   }
 
   /**

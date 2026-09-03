@@ -61,6 +61,29 @@ class VisionEngine {
     }
   }
 
+  // Buffers para estabilização temporal de gestos (elimina flickering entre frames)
+  private leftNoteHistory: NaturalNote[] = [];
+  private leftAccidentalHistory: Accidental[] = [];
+  private rightQualityHistory: ChordQuality[] = [];
+  private readonly historyCapacity = 5;
+
+  private getMajorityValue<T>(history: T[], fallback: T): T {
+    if (history.length === 0) return fallback;
+    const frequency = new Map<T, number>();
+    for (const item of history) {
+      frequency.set(item, (frequency.get(item) || 0) + 1);
+    }
+    let bestItem = fallback;
+    let maxCount = 0;
+    for (const [item, count] of frequency.entries()) {
+      if (count > maxCount) {
+        maxCount = count;
+        bestItem = item;
+      }
+    }
+    return bestItem;
+  }
+
   /**
    * Processa um frame de vídeo da webcam
    */
@@ -79,22 +102,30 @@ class VisionEngine {
       const handednessObj = results.handednesses?.[index]?.[0];
       const detectedCategory = handednessObj?.categoryName;
       
-      const avgX = landmarks.reduce((sum, p) => sum + p.x, 0) / landmarks.length;
-      const avgY = landmarks.reduce((sum, p) => sum + p.y, 0) / landmarks.length;
+      // Espelha coordenadas X para corresponder à tela da webcam espelhada
+      const screenLandmarks: NormalizedLandmark[] = landmarks.map((p) => ({
+        ...p,
+        x: 1 - p.x,
+      }));
 
-      const extendedFingers = this.countExtendedFingers(landmarks);
-      const isPinching = this.checkPinch(landmarks);
+      const screenAvgX = screenLandmarks.reduce((sum, p) => sum + p.x, 0) / screenLandmarks.length;
+      const avgY = screenLandmarks.reduce((sum, p) => sum + p.y, 0) / screenLandmarks.length;
+
+      const extendedFingers = this.countExtendedFingers(screenLandmarks);
+      const isPinching = this.checkPinch(screenLandmarks);
 
       const handState: HandGestureState = {
         isDetected: true,
-        handType: (detectedCategory as 'Left' | 'Right') || (avgX > 0.5 ? 'Right' : 'Left'),
-        landmarks,
+        handType: (detectedCategory as 'Left' | 'Right') || (screenAvgX > 0.5 ? 'Right' : 'Left'),
+        landmarks: screenLandmarks,
         extendedFingersCount: extendedFingers,
         isPinching,
-        handCenter: { x: avgX, y: avgY },
+        handCenter: { x: screenAvgX, y: avgY },
       };
 
-      if (avgX < 0.5) {
+      // Mão no lado esquerdo da tela (visão do usuário) = Tônica / Acidentes
+      // Mão no lado direito da tela = Qualidade / Strumming
+      if (screenAvgX < 0.5) {
         leftHand = handState;
       } else {
         rightHand = handState;
@@ -102,24 +133,42 @@ class VisionEngine {
     });
 
     // Mão Esquerda determina a Tônica (Nota Base + Acidente)
-    let selectedBaseNote: NaturalNote = 'C';
-    let selectedAccidental: Accidental = 'natural';
+    let rawBaseNote: NaturalNote = 'C';
+    let rawAccidental: Accidental = 'natural';
 
     if (leftHand) {
-      selectedBaseNote = this.detectBaseNote(leftHand);
-      selectedAccidental = this.detectAccidental(leftHand);
+      rawBaseNote = this.detectBaseNote(leftHand);
+      rawAccidental = this.detectAccidental(leftHand);
+
+      this.leftNoteHistory.push(rawBaseNote);
+      if (this.leftNoteHistory.length > this.historyCapacity) this.leftNoteHistory.shift();
+
+      this.leftAccidentalHistory.push(rawAccidental);
+      if (this.leftAccidentalHistory.length > this.historyCapacity) this.leftAccidentalHistory.shift();
+    } else {
+      this.leftNoteHistory = [];
+      this.leftAccidentalHistory = [];
     }
 
+    const selectedBaseNote = this.getMajorityValue(this.leftNoteHistory, rawBaseNote);
+    const selectedAccidental = this.getMajorityValue(this.leftAccidentalHistory, rawAccidental);
     const selectedRoot = getChromaticNote(selectedBaseNote, selectedAccidental);
 
     // Mão Direita determina a Qualidade (O "Jeito" do Acorde) e o Gatilho
-    let selectedQuality: ChordQuality = 'major';
+    let rawQuality: ChordQuality = 'major';
     let shouldTriggerStrum = false;
 
     if (rightHand) {
-      selectedQuality = this.detectQuality(rightHand);
+      rawQuality = this.detectQuality(rightHand);
       shouldTriggerStrum = this.detectStrumming(rightHand, timestamp);
+
+      this.rightQualityHistory.push(rawQuality);
+      if (this.rightQualityHistory.length > this.historyCapacity) this.rightQualityHistory.shift();
+    } else {
+      this.rightQualityHistory = [];
     }
+
+    const selectedQuality = this.getMajorityValue(this.rightQualityHistory, rawQuality);
 
     return {
       leftHand,
@@ -212,10 +261,21 @@ class VisionEngine {
   private detectQuality(hand: HandGestureState): ChordQuality {
     const fingers = hand.extendedFingersCount;
     const isPinch = hand.isPinching;
+    const lm = hand.landmarks;
 
     if (isPinch) {
       return 'halfDiminished';
     }
+
+    // Gesto Horns/Chifrinho (Indicador + Mínimo estendidos, Médio e Anelar abaixados)
+    const isIndexUp = lm[8].y < lm[6].y;
+    const isPinkyUp = lm[20].y < lm[18].y;
+    const isMiddleDown = lm[12].y > lm[10].y;
+    const isRingDown = lm[16].y > lm[14].y;
+    if (isIndexUp && isPinkyUp && isMiddleDown && isRingDown) {
+      return 'sus4';
+    }
+
     if (fingers === 0) {
       return 'diminished';
     }

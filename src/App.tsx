@@ -1,19 +1,27 @@
 import { useState } from 'react';
-import { ControlsHeader } from './components/ControlsHeader';
+import { ControlsHeader, type PlayMode } from './components/ControlsHeader';
 import { CameraHUD } from './components/CameraHUD';
 import { GestureGuideModal } from './components/GestureGuideModal';
 import { Globe, Code2 } from 'lucide-react';
 
 export function App() {
   const [guideOpen, setGuideOpen] = useState(false);
+  const [playMode, setPlayMode] = useState<PlayMode>('strum');
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-slate-950 pb-8">
       <div>
-        <ControlsHeader onOpenGuide={() => setGuideOpen(true)} />
+        <ControlsHeader 
+          onOpenGuide={() => setGuideOpen(true)} 
+          playMode={playMode}
+          onPlayModeChange={setPlayMode}
+        />
 
         <main className="px-4">
-          <CameraHUD onOpenGuide={() => setGuideOpen(true)} />
+          <CameraHUD 
+            onOpenGuide={() => setGuideOpen(true)} 
+            playMode={playMode}
+          />
         </main>
       </div>
 

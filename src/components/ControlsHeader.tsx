@@ -1,12 +1,20 @@
 import React, { useState } from 'react';
 import { soundEngine, type InstrumentPreset } from '../lib/soundEngine';
-import { Volume2, VolumeX, HelpCircle, Music } from 'lucide-react';
+import { Volume2, VolumeX, HelpCircle, Music, Zap, Waves } from 'lucide-react';
+
+export type PlayMode = 'strum' | 'sustain';
 
 interface ControlsHeaderProps {
   onOpenGuide: () => void;
+  playMode: PlayMode;
+  onPlayModeChange: (mode: PlayMode) => void;
 }
 
-export const ControlsHeader: React.FC<ControlsHeaderProps> = ({ onOpenGuide }) => {
+export const ControlsHeader: React.FC<ControlsHeaderProps> = ({ 
+  onOpenGuide,
+  playMode,
+  onPlayModeChange,
+}) => {
   const [selectedPreset, setSelectedPreset] = useState<InstrumentPreset>('warmPad');
   const [volume, setVolume] = useState(-6);
   const [isMuted, setIsMuted] = useState(false);
@@ -56,6 +64,34 @@ export const ControlsHeader: React.FC<ControlsHeaderProps> = ({ onOpenGuide }) =
 
       {/* Controles de Som & Preset */}
       <div className="flex flex-wrap items-center gap-3">
+        {/* Seletor de Modo: Palhetada vs Sustentação */}
+        <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 shadow-inner">
+          <button
+            onClick={() => onPlayModeChange('strum')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              playMode === 'strum'
+                ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Dispara o acorde ao fazer um movimento rápido de descida com a mão direita"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>Palhetada</span>
+          </button>
+          <button
+            onClick={() => onPlayModeChange('sustain')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              playMode === 'sustain'
+                ? 'bg-gradient-to-r from-cyan-500 to-emerald-500 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Sustenta o acorde continuamente enquanto as mãos estiverem visíveis"
+          >
+            <Waves className="w-3.5 h-3.5" />
+            <span>Sustentação</span>
+          </button>
+        </div>
+
         {/* Seletor de Timbre */}
         <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 shadow-inner">
           <button
