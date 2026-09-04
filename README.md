@@ -50,6 +50,8 @@ Modula o tipo de tétrade ou tríade executada:
 * 👌 **Pinch (Polegar + Indicador se tocando):** Acorde Meio-Diminuto (*ex: Bm7b5, F#m7b5*)
 * ✊ **Punho Fechado:** Acorde Diminuto Completo (*ex: C°*)
 
+> 💡 **Customização Total de Gestos:** Todas as posições de mão para as notas e qualidades harmônicas podem ser livremente remapeadas no botão **Mapear** da barra de controles e são salvas automaticamente no navegador.
+
 #### ⚡ O Gatilho (Palhetada no Ar / Strumming):
 Ao fazer um movimento rápido de **descida no ar com a mão direita**, o motor de áudio calcula as notas exatas e as toca em cascata (*strumming* de 35ms), simulando o dedilhado de um violão ou harpa com efeito visual de onda de choque no canvas.
 

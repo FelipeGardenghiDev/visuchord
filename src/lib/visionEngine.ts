@@ -6,6 +6,11 @@ import {
   type ChromaticNote, 
   getChromaticNote 
 } from './musicTheory';
+import {
+  type GestureId,
+  type GestureMappingConfig,
+  loadGestureConfig,
+} from './gestureConfig';
 
 export interface HandGestureState {
   isDetected: boolean;
@@ -14,6 +19,7 @@ export interface HandGestureState {
   extendedFingersCount: number;
   isPinching: boolean;
   handCenter: { x: number; y: number };
+  detectedGesture: GestureId;
 }
 
 export interface VisuChordDetectionResult {
@@ -31,6 +37,18 @@ class VisionEngine {
   private isModelLoading = false;
   private lastStrumTime = 0;
   private previousRightHandY = 0;
+  private gestureConfig: GestureMappingConfig = loadGestureConfig();
+
+  /**
+   * Atualiza a configuração de mapeamento de gestos em tempo real
+   */
+  public setGestureConfig(config: GestureMappingConfig): void {
+    this.gestureConfig = config;
+  }
+
+  public getGestureConfig(): GestureMappingConfig {
+    return this.gestureConfig;
+  }
 
   /**
    * Carrega o modelo do Google MediaPipe Hands via WebAssembly + GPU
@@ -113,6 +131,7 @@ class VisionEngine {
 
       const extendedFingers = this.countExtendedFingers(screenLandmarks);
       const isPinching = this.checkPinch(screenLandmarks);
+      const detectedGesture = this.identifyGesture(screenLandmarks);
 
       const handState: HandGestureState = {
         isDetected: true,
@@ -121,6 +140,7 @@ class VisionEngine {
         extendedFingersCount: extendedFingers,
         isPinching,
         handCenter: { x: screenAvgX, y: avgY },
+        detectedGesture,
       };
 
       // Mão no lado esquerdo da tela (visão do usuário) = Tônica / Acidentes
@@ -182,62 +202,171 @@ class VisionEngine {
   }
 
   /**
-   * Conta quantos dedos estão estendidos (levantados)
+   * Distância euclidiana 2D entre dois marcos anatômicos
+   */
+  private landmarkDist(p1: NormalizedLandmark, p2: NormalizedLandmark): number {
+    return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+  }
+
+  /**
+   * Avalia individualmente se um dedo longo (indicador, médio, anelar ou mínimo) está estendido.
+   * Utiliza tanto a distância euclidiana relativa ao punho (lm[0]) quanto projeções verticais,
+   * garantindo robustez a inclinações leves da mão.
+   */
+  private isLongFingerExtended(lm: NormalizedLandmark[], tipIdx: number, pipIdx: number, mcpIdx: number): boolean {
+    const dWristTip = this.landmarkDist(lm[tipIdx], lm[0]);
+    const dWristPip = this.landmarkDist(lm[pipIdx], lm[0]);
+    const dWristMcp = this.landmarkDist(lm[mcpIdx], lm[0]);
+
+    // O dedo está estendido se a ponta estiver consideravelmente mais longe do punho que a articulação base/média
+    const isFartherThanPip = dWristTip > dWristPip * 1.10;
+    const isFartherThanMcp = dWristTip > dWristMcp * 1.22;
+    const isAbovePip = lm[tipIdx].y < lm[pipIdx].y + 0.04;
+
+    return (isFartherThanPip && isFartherThanMcp) || (isAbovePip && dWristTip > dWristMcp * 1.15);
+  }
+
+  /**
+   * Avalia se um dedo longo está dobrado/recolhido em direção à palma (curled)
+   */
+  private isLongFingerCurled(lm: NormalizedLandmark[], tipIdx: number, pipIdx: number, mcpIdx: number): boolean {
+    const dWristTip = this.landmarkDist(lm[tipIdx], lm[0]);
+    const dWristPip = this.landmarkDist(lm[pipIdx], lm[0]);
+    const dWristMcp = this.landmarkDist(lm[mcpIdx], lm[0]);
+
+    // Ponta está recolhida próxima à palma/punho
+    return dWristTip <= dWristPip * 1.08 || dWristTip <= dWristMcp * 1.25 || lm[tipIdx].y > lm[pipIdx].y - 0.01;
+  }
+
+  /**
+   * Avalia se o polegar está estendido/aberto lateralmente ou para cima
+   */
+  private isThumbExtended(lm: NormalizedLandmark[]): boolean {
+    const thumbDistToIndexMcp = this.landmarkDist(lm[4], lm[5]);
+    const dWristThumbTip = this.landmarkDist(lm[4], lm[0]);
+    const dWristThumbMcp = this.landmarkDist(lm[2], lm[0]);
+
+    return thumbDistToIndexMcp > 0.09 && dWristThumbTip > dWristThumbMcp * 1.15;
+  }
+
+  /**
+   * Conta quantos dedos estão estendidos
    */
   private countExtendedFingers(lm: NormalizedLandmark[]): number {
     let count = 0;
-
-    // Indicador (tip: 8, pip: 6)
-    if (lm[8].y < lm[6].y) count++;
-    // Médio (tip: 12, pip: 10)
-    if (lm[12].y < lm[10].y) count++;
-    // Anelar (tip: 16, pip: 14)
-    if (lm[16].y < lm[14].y) count++;
-    // Mínimo (tip: 20, pip: 18)
-    if (lm[20].y < lm[18].y) count++;
-    // Polegar (distância para a base do indicador)
-    const thumbDistance = Math.hypot(lm[4].x - lm[2].x, lm[4].y - lm[2].y);
-    if (thumbDistance > 0.08) count++;
-
+    if (this.isLongFingerExtended(lm, 8, 6, 5)) count++;
+    if (this.isLongFingerExtended(lm, 12, 10, 9)) count++;
+    if (this.isLongFingerExtended(lm, 16, 14, 13)) count++;
+    if (this.isLongFingerExtended(lm, 20, 18, 17)) count++;
+    if (this.isThumbExtended(lm)) count++;
     return count;
   }
 
   /**
-   * Detecta se o polegar e o indicador estão se tocando (Pinch)
+   * Detecta se o polegar e o indicador estão em pinça (Pinch)
    */
   private checkPinch(lm: NormalizedLandmark[]): boolean {
-    const thumbTip = lm[4];
-    const indexTip = lm[8];
-    const distance = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-    return distance < 0.055;
+    const distance = this.landmarkDist(lm[4], lm[8]);
+    return distance < 0.065;
   }
 
   /**
-   * Mapeia os gestos da mão esquerda para as 7 notas naturais
+   * Identifica de forma robusta e precisa o gesto da mão entre o catálogo disponível
+   */
+  public identifyGesture(lm: NormalizedLandmark[]): GestureId {
+    const isIndexExt = this.isLongFingerExtended(lm, 8, 6, 5);
+    const isMiddleExt = this.isLongFingerExtended(lm, 12, 10, 9);
+    const isRingExt = this.isLongFingerExtended(lm, 16, 14, 13);
+    const isPinkyExt = this.isLongFingerExtended(lm, 20, 18, 17);
+    const isThumbExt = this.isThumbExtended(lm);
+
+    const isIndexCurled = this.isLongFingerCurled(lm, 8, 6, 5);
+    const isMiddleCurled = this.isLongFingerCurled(lm, 12, 10, 9);
+    const isRingCurled = this.isLongFingerCurled(lm, 16, 14, 13);
+    const isPinkyCurled = this.isLongFingerCurled(lm, 20, 18, 17);
+
+    // 1. PINCH (Polegar + Indicador juntos)
+    if (this.checkPinch(lm)) {
+      return 'pinch';
+    }
+
+    // 2. PUNHO FECHADO (FIST) / THUMB UP
+    // Se os 4 dedos principais (indicador, médio, anelar e mínimo) estão dobrados para dentro da palma:
+    const allFourFingersCurled = isIndexCurled && isMiddleCurled && isRingCurled && isPinkyCurled && !isIndexExt && !isMiddleExt && !isRingExt && !isPinkyExt;
+
+    if (allFourFingersCurled) {
+      // Se o polegar estiver explicitamente apontado para cima acima das articulações:
+      const isThumbPointingUp = lm[4].y < lm[3].y && lm[4].y < lm[2].y && lm[4].y < lm[5].y && isThumbExt;
+      if (isThumbPointingUp) {
+        return 'thumb_up';
+      }
+      // Caso contrário, é garantidamente PUNHO FECHADO (Si / Diminuto)
+      // Não importa onde o polegar esteja repousando sobre os dedos!
+      return 'fist';
+    }
+
+    // 3. HANG LOOSE (Shaka: Polegar + Mínimo estendidos, dedos centrais recolhidos)
+    if (isThumbExt && isPinkyExt && isIndexCurled && isMiddleCurled && isRingCurled) {
+      return 'hang_loose';
+    }
+
+    // 4. CHIFRINHO / HORNS (Indicador + Mínimo estendidos, médio e anelar recolhidos)
+    if (isIndexExt && isPinkyExt && isMiddleCurled && isRingCurled) {
+      return 'horns';
+    }
+
+    // 5. CONTAGEM DE DEDOS PADRÃO
+    const extendedFourCount = (isIndexExt ? 1 : 0) + (isMiddleExt ? 1 : 0) + (isRingExt ? 1 : 0) + (isPinkyExt ? 1 : 0);
+
+    // Se todos os 5 dedos estão abertos
+    if (extendedFourCount === 4 && isThumbExt) {
+      return 'five_fingers';
+    }
+
+    if (extendedFourCount === 4) {
+      return 'four_fingers';
+    }
+
+    if (extendedFourCount === 3 && isIndexExt && isMiddleExt && isRingExt) {
+      return 'three_fingers';
+    }
+
+    if (extendedFourCount === 2 && isIndexExt && isMiddleExt) {
+      return 'two_fingers';
+    }
+
+    if (extendedFourCount === 1 && isIndexExt) {
+      return 'one_finger';
+    }
+
+    // Fallbacks para contagem geral de dedos estendidos
+    const totalCount = extendedFourCount + (isThumbExt ? 1 : 0);
+    if (totalCount >= 5) return 'five_fingers';
+    if (totalCount === 4) return 'four_fingers';
+    if (totalCount === 3) return 'three_fingers';
+    if (totalCount === 2) return 'two_fingers';
+    if (totalCount === 1) return 'one_finger';
+
+    return 'fist';
+  }
+
+  /**
+   * Mapeia os gestos da mão esquerda para as 7 notas naturais usando a configuração dinâmica
    */
   private detectBaseNote(hand: HandGestureState): NaturalNote {
-    const fingers = hand.extendedFingersCount;
-    const lm = hand.landmarks;
+    const gesture = hand.detectedGesture;
 
-    if (fingers === 1) return 'C';
-    if (fingers === 2) return 'D';
-    if (fingers === 3) return 'E';
-    if (fingers === 4) return 'F';
-    if (fingers >= 5) return 'G';
-
-    const isPinkyUp = lm[20].y < lm[18].y;
-    const isThumbOut = Math.hypot(lm[4].x - lm[2].x, lm[4].y - lm[2].y) > 0.08;
-    const isMiddleDown = lm[12].y > lm[10].y;
-
-    if (isPinkyUp && isThumbOut && isMiddleDown) {
-      return 'A';
+    // Busca nas configurações do usuário qual nota está mapeada para o gesto detectado
+    const mapping = this.gestureConfig.leftHandNotes;
+    for (const [noteKey, mappedGesture] of Object.entries(mapping)) {
+      if (mappedGesture === gesture) {
+        return noteKey as NaturalNote;
+      }
     }
 
-    if (fingers === 0) {
-      return 'B';
-    }
-
-    return 'C';
+    // Caso o gesto não esteja explicitamente mapeado, mantém o valor anterior estável ou fallback inteligente
+    const lastNote = this.leftNoteHistory[this.leftNoteHistory.length - 1];
+    return lastNote || 'C';
   }
 
   /**
@@ -256,42 +385,22 @@ class VisionEngine {
   }
 
   /**
-   * Mapeia os gestos da mão direita para o "jeito" do acorde (Qualidade Harmônica)
+   * Mapeia os gestos da mão direita para a qualidade do acorde usando a configuração dinâmica
    */
   private detectQuality(hand: HandGestureState): ChordQuality {
-    const fingers = hand.extendedFingersCount;
-    const isPinch = hand.isPinching;
-    const lm = hand.landmarks;
+    const gesture = hand.detectedGesture;
 
-    if (isPinch) {
-      return 'halfDiminished';
-    }
-
-    // Gesto Horns/Chifrinho (Indicador + Mínimo estendidos, Médio e Anelar abaixados)
-    const isIndexUp = lm[8].y < lm[6].y;
-    const isPinkyUp = lm[20].y < lm[18].y;
-    const isMiddleDown = lm[12].y > lm[10].y;
-    const isRingDown = lm[16].y > lm[14].y;
-    if (isIndexUp && isPinkyUp && isMiddleDown && isRingDown) {
-      return 'sus4';
+    // Busca nas configurações do usuário qual qualidade está mapeada para o gesto detectado
+    const mapping = this.gestureConfig.rightHandQualities;
+    for (const [qualityKey, mappedGesture] of Object.entries(mapping)) {
+      if (mappedGesture === gesture) {
+        return qualityKey as ChordQuality;
+      }
     }
 
-    if (fingers === 0) {
-      return 'diminished';
-    }
-    if (fingers === 1) {
-      return 'dominant7';
-    }
-    if (fingers === 2) {
-      return 'minor';
-    }
-    if (fingers === 3) {
-      return 'minor7';
-    }
-    if (fingers === 4) {
-      return 'major7';
-    }
-    return 'major';
+    // Caso o gesto não esteja explicitamente mapeado, mantém o valor anterior estável ou fallback inteligente
+    const lastQuality = this.rightQualityHistory[this.rightQualityHistory.length - 1];
+    return lastQuality || 'major';
   }
 
   /**

@@ -1,12 +1,35 @@
 import React from 'react';
-import { X, Hand, Sparkles, Music2 } from 'lucide-react';
+import { X, Hand, Sparkles, Music2, Settings2 } from 'lucide-react';
+import { 
+  AVAILABLE_GESTURES, 
+  DEFAULT_GESTURE_CONFIG, 
+  type GestureMappingConfig 
+} from '../lib/gestureConfig';
+import { NATURAL_NOTES, CHORD_QUALITIES, type NaturalNote } from '../lib/musicTheory';
 
 interface GestureGuideModalProps {
   isOpen: boolean;
   onClose: () => void;
+  config?: GestureMappingConfig;
+  onOpenSettings?: () => void;
 }
 
-export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({ isOpen, onClose }) => {
+const NOTE_NAMES_PT: Record<NaturalNote, string> = {
+  C: 'Dó (C)',
+  D: 'Ré (D)',
+  E: 'Mi (E)',
+  F: 'Fá (F)',
+  G: 'Sol (G)',
+  A: 'Lá (A)',
+  B: 'Si (B)',
+};
+
+export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({ 
+  isOpen, 
+  onClose,
+  config = DEFAULT_GESTURE_CONFIG,
+  onOpenSettings,
+}) => {
   if (!isOpen) return null;
 
   return (
@@ -27,51 +50,56 @@ export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({ isOpen, on
               <p className="text-xs text-slate-400">Controle musical completo pelas suas mãos</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          
+          <div className="flex items-center gap-2">
+            {onOpenSettings && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenSettings();
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 text-xs font-semibold transition-all"
+                title="Personalizar os gestos de cada nota e acorde"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Personalizar</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
           {/* Mão Esquerda */}
           <div className="bg-slate-950/60 border border-cyan-500/30 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm uppercase tracking-wider">
-              <Hand className="w-4 h-4" />
-              Mão Esquerda: Tônica (Nota Base)
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm uppercase tracking-wider">
+                <Hand className="w-4 h-4" />
+                Mão Esquerda: Tônica (Nota Base)
+              </div>
+              <span className="text-[10px] text-cyan-400/80 font-mono">Posições Ativas</span>
             </div>
 
             <div className="space-y-2.5 text-xs">
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">☝️ 1 Dedo levantado</span>
-                <span className="font-bold text-cyan-400 font-mono text-sm">Dó (C)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">✌️ 2 Dedos levantados</span>
-                <span className="font-bold text-cyan-400 font-mono text-sm">Ré (D)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🤟 3 Dedos levantados</span>
-                <span className="font-bold text-cyan-400 font-mono text-sm">Mi (E)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🖖 4 Dedos levantados</span>
-                <span className="font-bold text-cyan-400 font-mono text-sm">Fá (F)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🖐️ 5 Dedos (Mão Aberta)</span>
-                <span className="font-bold text-cyan-400 font-mono text-sm">Sol (G)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🤙 Hang Loose (Polegar + Mínimo)</span>
-                <span className="font-bold text-cyan-400 font-mono text-sm">Lá (A)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">✊ Mão Fechada (Punho)</span>
-                <span className="font-bold text-cyan-400 font-mono text-sm">Si (B)</span>
-              </div>
+              {NATURAL_NOTES.map((note) => {
+                const gestureId = config.leftHandNotes[note];
+                const gesture = AVAILABLE_GESTURES[gestureId];
+                return (
+                  <div key={note} className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
+                    <span className="font-semibold text-slate-300">
+                      {gesture ? `${gesture.emoji} ${gesture.name}` : gestureId}
+                    </span>
+                    <span className="font-bold text-cyan-400 font-mono text-sm">
+                      {NOTE_NAMES_PT[note]}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Modificador de Acidente (# / b) */}
@@ -96,44 +124,29 @@ export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({ isOpen, on
 
           {/* Mão Direita */}
           <div className="bg-slate-950/60 border border-purple-500/30 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center gap-2 text-purple-400 font-bold text-sm uppercase tracking-wider">
-              <Music2 className="w-4 h-4" />
-              Mão Direita: Qualidade & Palhetada
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-purple-400 font-bold text-sm uppercase tracking-wider">
+                <Music2 className="w-4 h-4" />
+                Mão Direita: Qualidade & Palhetada
+              </div>
+              <span className="text-[10px] text-purple-400/80 font-mono">Harmonia</span>
             </div>
 
             <div className="space-y-2.5 text-xs">
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🖐️ Mão Aberta (5 Dedos)</span>
-                <span className="font-bold text-purple-400 font-mono text-sm">Maior (Maj)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">✌️ 2 Dedos (Paz &amp; Amor)</span>
-                <span className="font-bold text-purple-400 font-mono text-sm">Menor (m)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">☝️ 1 Dedo (Indicador)</span>
-                <span className="font-bold text-purple-400 font-mono text-sm">Dominante (7)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🖖 4 Dedos levantados</span>
-                <span className="font-bold text-purple-400 font-mono text-sm">Sétima Maior (7M)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🤟 3 Dedos levantados</span>
-                <span className="font-bold text-purple-400 font-mono text-sm">Menor com 7ª (m7)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">🤘 Horns (Indicador + Mínimo)</span>
-                <span className="font-bold text-purple-400 font-mono text-sm">Suspenso 4 (sus4)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">👌 Pinch (Polegar + Indicador)</span>
-                <span className="font-bold text-purple-400 font-mono text-sm">Meio-Diminuto (m7b5)</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
-                <span className="font-semibold text-slate-300">✊ Mão Fechada (Punho)</span>
-                <span className="font-bold text-purple-400 font-mono text-sm">Diminuto (°)</span>
-              </div>
+              {Object.entries(CHORD_QUALITIES).map(([qualKey, def]) => {
+                const gestureId = config.rightHandQualities[qualKey as keyof typeof CHORD_QUALITIES];
+                const gesture = AVAILABLE_GESTURES[gestureId];
+                return (
+                  <div key={qualKey} className="flex justify-between items-center p-2 rounded-lg bg-slate-900/60">
+                    <span className="font-semibold text-slate-300">
+                      {gesture ? `${gesture.emoji} ${gesture.name}` : gestureId}
+                    </span>
+                    <span className="font-bold text-purple-400 font-mono text-sm">
+                      {def.label} {def.symbol ? `(${def.symbol})` : ''}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Modos de Execução */}
@@ -149,10 +162,23 @@ export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({ isOpen, on
           </div>
         </div>
 
-        <div className="mt-6 pt-4 border-t border-slate-800 flex justify-end">
+        <div className="mt-6 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          {onOpenSettings && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenSettings();
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all"
+            >
+              <Settings2 className="w-4 h-4 text-cyan-400" />
+              <span>Personalizar Mapeamento de Posições</span>
+            </button>
+          )}
+
           <button
             onClick={onClose}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 transition-all"
+            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 transition-all ml-auto"
           >
             Entendido, vamos tocar!
           </button>

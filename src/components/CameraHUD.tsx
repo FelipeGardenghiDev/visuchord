@@ -9,12 +9,14 @@ import {
   formatNoteName,
   CHORD_QUALITIES
 } from '../lib/musicTheory';
+import { AVAILABLE_GESTURES } from '../lib/gestureConfig';
 import { VirtualPiano } from './VirtualPiano';
-import { Sparkles, Camera, CameraOff, Volume2, HelpCircle } from 'lucide-react';
+import { Sparkles, Camera, CameraOff, Volume2, HelpCircle, Settings2 } from 'lucide-react';
 import type { PlayMode } from './ControlsHeader';
 
 interface CameraHUDProps {
   onOpenGuide: () => void;
+  onOpenSettings?: () => void;
   playMode: PlayMode;
 }
 
@@ -140,7 +142,7 @@ function drawShockwave(
   ctx.restore();
 }
 
-export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, playMode }) => {
+export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSettings, playMode }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -265,24 +267,28 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, playMode }) =
             // 4. Desenha as mãos no canvas
             if (detection.leftHand) {
               drawHandSkeleton(ctx, detection.leftHand.landmarks, canvas.width, canvas.height, '#06b6d4');
+              const gInfo = AVAILABLE_GESTURES[detection.leftHand.detectedGesture];
+              const gName = gInfo ? ` [${gInfo.emoji} ${gInfo.name}]` : '';
               drawHandLabel(
                 ctx, 
                 detection.leftHand.handCenter, 
                 canvas.width, 
                 canvas.height, 
-                `Tônica: ${formatNoteName(detection.selectedRoot)} (${detection.selectedAccidental})`,
+                `Tônica: ${formatNoteName(detection.selectedRoot)} (${detection.selectedAccidental})${gName}`,
                 '#06b6d4'
               );
             }
 
             if (detection.rightHand) {
               drawHandSkeleton(ctx, detection.rightHand.landmarks, canvas.width, canvas.height, '#c084fc');
+              const gInfo = AVAILABLE_GESTURES[detection.rightHand.detectedGesture];
+              const gName = gInfo ? ` [${gInfo.emoji} ${gInfo.name}]` : '';
               drawHandLabel(
                 ctx, 
                 detection.rightHand.handCenter, 
                 canvas.width, 
                 canvas.height, 
-                `Qualidade: ${CHORD_QUALITIES[detection.selectedQuality].label}`,
+                `Qualidade: ${CHORD_QUALITIES[detection.selectedQuality].label}${gName}`,
                 '#c084fc'
               );
 
@@ -435,9 +441,19 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, playMode }) =
                 onClick={onOpenGuide}
                 className="px-6 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm border border-slate-700 transition-all flex items-center gap-2"
               >
-                <HelpCircle className="w-4 h-4" />
-                Ver Guia de Gestos
+                <HelpCircle className="w-4 h-4 text-cyan-400" />
+                Guia de Gestos
               </button>
+
+              {onOpenSettings && (
+                <button
+                  onClick={onOpenSettings}
+                  className="px-6 py-3.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 font-semibold text-sm border border-cyan-500/30 transition-all flex items-center gap-2"
+                >
+                  <Settings2 className="w-4 h-4 text-cyan-400" />
+                  Personalizar Posições
+                </button>
+              )}
             </div>
           </div>
         )}

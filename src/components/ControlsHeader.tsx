@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { soundEngine, type InstrumentPreset } from '../lib/soundEngine';
-import { Volume2, VolumeX, HelpCircle, Music, Zap, Waves } from 'lucide-react';
+import { Volume2, VolumeX, HelpCircle, Music, Zap, Waves, Settings2 } from 'lucide-react';
 
 export type PlayMode = 'strum' | 'sustain';
 
 interface ControlsHeaderProps {
   onOpenGuide: () => void;
+  onOpenSettings: () => void;
   playMode: PlayMode;
   onPlayModeChange: (mode: PlayMode) => void;
 }
 
 export const ControlsHeader: React.FC<ControlsHeaderProps> = ({ 
   onOpenGuide,
+  onOpenSettings,
   playMode,
   onPlayModeChange,
 }) => {
@@ -156,13 +158,24 @@ export const ControlsHeader: React.FC<ControlsHeaderProps> = ({
           />
         </div>
 
+        {/* Botão de Personalização de Mapeamento */}
+        <button
+          onClick={onOpenSettings}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-xs font-semibold text-cyan-300 transition-all shadow-sm"
+          title="Personalizar quais gestos ativam cada nota e acorde"
+        >
+          <Settings2 className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="hidden sm:inline">Mapear</span>
+        </button>
+
         {/* Botão de Ajuda de Gestos */}
         <button
           onClick={onOpenGuide}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition-all shadow-sm"
+          title="Ver o guia de gestos e mecânica musical"
         >
           <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Gestos</span>
+          <span>Guia</span>
         </button>
       </div>
     </header>
