@@ -82,6 +82,8 @@ export const AVAILABLE_GESTURES: Record<GestureId, GestureInfo> = {
   },
 };
 
+export const GESTURE_IDS: GestureId[] = Object.keys(AVAILABLE_GESTURES) as GestureId[];
+
 export interface GestureMappingConfig {
   leftHandNotes: Record<NaturalNote, GestureId>;
   rightHandQualities: Record<ChordQuality, GestureId>;

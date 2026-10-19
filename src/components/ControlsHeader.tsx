@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { soundEngine, type InstrumentPreset } from '../lib/soundEngine';
-import { Volume2, VolumeX, HelpCircle, Music, Zap, Waves, Settings2 } from 'lucide-react';
+import { Volume2, VolumeX, HelpCircle, Music, Zap, Waves, Settings2, Circle } from 'lucide-react';
 
 export type PlayMode = 'strum' | 'sustain';
 
@@ -20,6 +20,41 @@ export const ControlsHeader: React.FC<ControlsHeaderProps> = ({
   const [selectedPreset, setSelectedPreset] = useState<InstrumentPreset>('warmPad');
   const [volume, setVolume] = useState(-6);
   const [isMuted, setIsMuted] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (isRecording) {
+      interval = setInterval(() => {
+        setRecordSeconds((s) => s + 1);
+      }, 1000);
+    } else {
+      setRecordSeconds(0);
+    }
+    return () => clearInterval(interval);
+  }, [isRecording]);
+
+  const handleToggleRecord = async () => {
+    if (!isRecording) {
+      const started = await soundEngine.startRecording();
+      if (started) {
+        setIsRecording(true);
+      }
+    } else {
+      const blob = await soundEngine.stopRecording();
+      setIsRecording(false);
+      if (blob && blob.size > 0) {
+        soundEngine.downloadRecording(blob);
+      }
+    }
+  };
+
+  const formatRecordTime = (totalSec: number) => {
+    const m = Math.floor(totalSec / 60).toString().padStart(2, '0');
+    const s = (totalSec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
   const handlePresetChange = (preset: InstrumentPreset) => {
     setSelectedPreset(preset);
@@ -157,6 +192,20 @@ export const ControlsHeader: React.FC<ControlsHeaderProps> = ({
             className="w-16 sm:w-20 accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
           />
         </div>
+
+        {/* Gravação / Exportação de Áudio */}
+        <button
+          onClick={handleToggleRecord}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all shadow-sm ${
+            isRecording
+              ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 animate-pulse'
+              : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+          }`}
+          title={isRecording ? 'Parar e baixar gravação (WAV/WebM)' : 'Iniciar gravação de áudio'}
+        >
+          <Circle className={`w-3.5 h-3.5 ${isRecording ? 'fill-rose-500 text-rose-500' : 'text-rose-400'}`} />
+          <span>{isRecording ? `REC ${formatRecordTime(recordSeconds)}` : 'Gravar'}</span>
+        </button>
 
         {/* Botão de Personalização de Mapeamento */}
         <button

@@ -1,0 +1,16 @@
+{
+  "short_name": "VisuChord",
+  "name": "VisuChord — Instrumento Musical por Visão Computacional",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any 192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020617",
+  "theme_color": "#06b6d4",
+  "display": "standalone",
+  "orientation": "landscape-primary"
+}

@@ -9,6 +9,8 @@ class SoundEngine {
   private chorus: Tone.Chorus | null = null;
   private limiter: Tone.Limiter | null = null;
   private volumeNode: Tone.Volume | null = null;
+  private recorder: Tone.Recorder | null = null;
+  private recording = false;
   private activePreset: InstrumentPreset = 'warmPad';
   private currentlyPlayingNotes: string[] = [];
   private sustainedNotes: string[] = [];
@@ -24,6 +26,10 @@ class SoundEngine {
     // Cria os nós de efeito e proteção contra distorção (Limiter)
     this.volumeNode = new Tone.Volume(-6).toDestination();
     this.limiter = new Tone.Limiter(-1).connect(this.volumeNode);
+
+    // Conecta o gravador de performance em paralelo com a saída de áudio
+    this.recorder = new Tone.Recorder();
+    this.volumeNode.connect(this.recorder);
 
     this.reverb = new Tone.Reverb({
       decay: 3.5,
@@ -197,6 +203,85 @@ class SoundEngine {
 
   public getCurrentlyPlayingNotes(): string[] {
     return this.currentlyPlayingNotes;
+  }
+
+  public isRecordingActive(): boolean {
+    return this.recording;
+  }
+
+  /**
+   * Inicia a gravação direta do fluxo de áudio estéreo
+   */
+  public async startRecording(): Promise<boolean> {
+    if (!this.isInitialized) {
+      await this.init();
+    }
+    if (!this.recorder || this.recording) return false;
+
+    try {
+      this.recorder.start();
+      this.recording = true;
+      return true;
+    } catch (err) {
+      console.warn('Falha ao iniciar Tone.Recorder:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Finaliza a gravação e retorna o arquivo de áudio gravado (Blob)
+   */
+  public async stopRecording(): Promise<Blob | null> {
+    if (!this.recorder || !this.recording) return null;
+
+    try {
+      this.recording = false;
+      const audioBlob = await this.recorder.stop();
+      return audioBlob;
+    } catch (err) {
+      console.warn('Falha ao finalizar Tone.Recorder:', err);
+      this.recording = false;
+      return null;
+    }
+  }
+
+  /**
+   * Dispara o download automático do arquivo de áudio no navegador
+   */
+  public downloadRecording(blob: Blob, customName?: string): void {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const fileName = customName || `visuchord-performance-${timestamp}.webm`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 1500);
+  }
+
+  /**
+   * Retorna a latência estimada da camada Web Audio API em milissegundos
+   */
+  public getAudioLatency(): number {
+    try {
+      const rawCtx = Tone.getContext().rawContext;
+      if (rawCtx) {
+        const baseLatency = (rawCtx as AudioContext).baseLatency || 0;
+        const outputLatency = (rawCtx as AudioContext).outputLatency || 0;
+        const totalSec = baseLatency + outputLatency;
+        if (totalSec > 0) {
+          return Number((totalSec * 1000).toFixed(1));
+        }
+      }
+    } catch {
+      // Ignora erro se contexto não inicializado
+    }
+    return 10.0;
   }
 }
 

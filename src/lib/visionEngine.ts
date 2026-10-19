@@ -30,6 +30,7 @@ export interface VisuChordDetectionResult {
   selectedAccidental: Accidental;
   selectedQuality: ChordQuality;
   shouldTriggerStrum: boolean;
+  inferenceTimeMs: number;
 }
 
 class VisionEngine {
@@ -37,7 +38,15 @@ class VisionEngine {
   private isModelLoading = false;
   private lastStrumTime = 0;
   private previousRightHandY = 0;
+  private lastInferenceTimeMs = 0;
   private gestureConfig: GestureMappingConfig = loadGestureConfig();
+
+  /**
+   * Retorna a latência da última inferência neural em milissegundos
+   */
+  public getLastInferenceTime(): number {
+    return this.lastInferenceTimeMs;
+  }
 
   /**
    * Atualiza a configuração de mapeamento de gestos em tempo real
@@ -108,7 +117,10 @@ class VisionEngine {
   public processVideoFrame(video: HTMLVideoElement, timestamp: number): VisuChordDetectionResult | null {
     if (!this.handLandmarker) return null;
 
+    const tStart = performance.now();
     const results = this.handLandmarker.detectForVideo(video, timestamp);
+    this.lastInferenceTimeMs = Number((performance.now() - tStart).toFixed(1));
+
     if (!results.landmarks || results.landmarks.length === 0) {
       return null;
     }
@@ -198,6 +210,7 @@ class VisionEngine {
       selectedAccidental,
       selectedQuality,
       shouldTriggerStrum,
+      inferenceTimeMs: this.lastInferenceTimeMs,
     };
   }
 

@@ -4,14 +4,29 @@ import { soundEngine } from '../lib/soundEngine';
 import { 
   getChordNotes, 
   getChordFullName, 
+  getChromaticNote,
   type ChromaticNote, 
   type ChordQuality,
+  type NaturalNote,
+  type Accidental,
   formatNoteName,
   CHORD_QUALITIES
 } from '../lib/musicTheory';
-import { AVAILABLE_GESTURES } from '../lib/gestureConfig';
+import { AVAILABLE_GESTURES, type GestureId } from '../lib/gestureConfig';
+import { generateSimulatedHandLandmarks } from '../lib/virtualHandSimulator';
 import { VirtualPiano } from './VirtualPiano';
-import { Sparkles, Camera, CameraOff, Volume2, HelpCircle, Settings2 } from 'lucide-react';
+import { 
+  Sparkles, 
+  Camera, 
+  CameraOff, 
+  Volume2, 
+  HelpCircle, 
+  Settings2, 
+  Activity, 
+  Play, 
+  RefreshCw,
+  Radio
+} from 'lucide-react';
 import type { PlayMode } from './ControlsHeader';
 
 interface CameraHUDProps {
@@ -142,6 +157,22 @@ function drawShockwave(
   ctx.restore();
 }
 
+const NATURAL_NOTES: NaturalNote[] = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const ACCIDENTALS: { value: Accidental; label: string; shortcut: string }[] = [
+  { value: 'flat', label: '♭ Bemol', shortcut: 'Z' },
+  { value: 'natural', label: '♮ Natural', shortcut: 'X' },
+  { value: 'sharp', label: '# Sustenido', shortcut: 'C' },
+];
+const QUALITIES: ChordQuality[] = [
+  'major', 
+  'minor', 
+  'dominant7', 
+  'major7', 
+  'minor7', 
+  'diminished', 
+  'sus4'
+];
+
 export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSettings, playMode }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -150,13 +181,28 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
   const [modelLoading, setModelLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Modo Virtual de Contingência (Hardware Resilience & Fallback Playground)
+  const [isVirtualMode, setIsVirtualMode] = useState(false);
+  const [virtualBaseNote, setVirtualBaseNote] = useState<NaturalNote>('C');
+  const [virtualAccidental, setVirtualAccidental] = useState<Accidental>('natural');
+  const [virtualQuality, setVirtualQuality] = useState<ChordQuality>('major');
+
+  // Telemetria em tempo real (FPS, Latência Neural, Latência de Áudio)
+  const [telemetry, setTelemetry] = useState({
+    fps: 60,
+    neuralLatencyMs: 0,
+    audioLatencyMs: 10,
+  });
+  const frameTimesRef = useRef<number[]>([]);
+  const lastTelemetryUpdateRef = useRef<number>(0);
+
   // Estados musicais detectados
   const [currentRoot, setCurrentRoot] = useState<ChromaticNote>('C');
   const [currentQuality, setCurrentQuality] = useState<ChordQuality>('major');
   const [currentNotes, setCurrentNotes] = useState<string[]>(['C3', 'E3', 'G3']);
   const [lastStrumTriggered, setLastStrumTriggered] = useState(false);
   const [isHandsSustaining, setIsHandsSustaining] = useState(false);
-  const isSustainingActive = playMode === 'sustain' && isHandsSustaining;
+  const isSustainingActive = playMode === 'sustain' && (isHandsSustaining || isVirtualMode);
 
   // Referência atualizada do modo de execução para uso dentro do requestAnimationFrame
   const playModeRef = useRef(playMode);
@@ -170,7 +216,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
   // Efeito de onda visual ao palhetar
   const shockwaveRef = useRef<{ x: number; y: number; radius: number; alpha: number } | null>(null);
 
-  // Inicia a webcam
+  // Inicia a webcam com tratamento de erros de hardware resiliente
   const startCamera = useCallback(async () => {
     try {
       setErrorMessage(null);
@@ -188,12 +234,28 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
         setCameraActive(true);
+        setIsVirtualMode(false);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Erro ao acessar webcam:', err);
-      setErrorMessage(
-        'Permissão da webcam negada ou câmera ocupada por outro aplicativo. Por favor, libere o acesso.'
-      );
+      const error = err as { name?: string };
+      if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
+        setErrorMessage(
+          'Permissão da câmera negada no navegador. Habilite a câmera nas permissões da página ou use o Playground Virtual interativo abaixo!'
+        );
+      } else if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') {
+        setErrorMessage(
+          'Nenhuma câmera foi detectada no seu dispositivo. Você pode tocar normalmente pelo Modo Playground Virtual abaixo!'
+        );
+      } else if (error?.name === 'NotReadableError' || error?.name === 'TrackStartError') {
+        setErrorMessage(
+          'A câmera está sendo utilizada por outro aplicativo ou aba. Feche outros apps ou aproveite o Modo Playground Virtual!'
+        );
+      } else {
+        setErrorMessage(
+          'Não foi possível inicializar a webcam. Experimente o Modo Playground Virtual interativo abaixo.'
+        );
+      }
     }
   }, []);
 
@@ -209,6 +271,25 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
     }
   }, []);
 
+  // Ativa o Playground Virtual (Sem Câmera)
+  const startVirtualPlayground = useCallback(async () => {
+    stopCamera();
+    await soundEngine.init();
+    setIsVirtualMode(true);
+    setErrorMessage(null);
+
+    const root = getChromaticNote(virtualBaseNote, virtualAccidental);
+    const notes = getChordNotes(root, virtualQuality);
+    setCurrentRoot(root);
+    setCurrentQuality(virtualQuality);
+    setCurrentNotes(notes);
+
+    if (playModeRef.current === 'sustain') {
+      soundEngine.setSustainedChord(notes);
+      setIsHandsSustaining(true);
+    }
+  }, [stopCamera, virtualBaseNote, virtualAccidental, virtualQuality]);
+
   // Carrega o modelo de Visão Computacional
   useEffect(() => {
     async function load() {
@@ -216,7 +297,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
         setModelLoading(true);
         await visionEngine.loadModel();
       } catch {
-        setErrorMessage('Não foi possível carregar o modelo MediaPipe Hands.');
+        setErrorMessage('Não foi possível carregar o modelo MediaPipe Hands via CDN.');
       } finally {
         setModelLoading(false);
       }
@@ -229,32 +310,134 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
     };
   }, [stopCamera]);
 
-  // Loop de detecção e renderização a 60 FPS
+  // Atualização de acordes no Modo Virtual
   useEffect(() => {
-    if (!cameraActive) return;
+    if (!isVirtualMode) return;
+    const root = getChromaticNote(virtualBaseNote, virtualAccidental);
+    const notes = getChordNotes(root, virtualQuality);
+    setCurrentRoot(root);
+    setCurrentQuality(virtualQuality);
+    setCurrentNotes(notes);
+
+    if (playModeRef.current === 'sustain') {
+      soundEngine.setSustainedChord(notes);
+      setIsHandsSustaining(true);
+    }
+  }, [isVirtualMode, virtualBaseNote, virtualAccidental, virtualQuality]);
+
+  // Disparo manual no Modo Virtual (Strum)
+  const triggerVirtualStrum = useCallback(() => {
+    soundEngine.strumChord(currentNotes);
+    setLastStrumTriggered(true);
+    setTimeout(() => setLastStrumTriggered(false), 200);
+
+    const canvas = canvasRef.current;
+    if (canvas) {
+      shockwaveRef.current = {
+        x: 0.72 * canvas.width,
+        y: 0.52 * canvas.height,
+        radius: 12,
+        alpha: 1,
+      };
+    }
+  }, [currentNotes]);
+
+  // Atalhos de teclado no Modo Virtual
+  useEffect(() => {
+    if (!isVirtualMode) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignora atalhos se o foco estiver em input de texto
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      const key = e.key.toUpperCase();
+
+      // Notas Naturais: 1 a 7
+      if (['1', '2', '3', '4', '5', '6', '7'].includes(key)) {
+        const noteIndex = Number(key) - 1;
+        setVirtualBaseNote(NATURAL_NOTES[noteIndex]);
+        return;
+      }
+
+      // Acidentes: Z, X, C
+      if (key === 'Z') {
+        setVirtualAccidental('flat');
+        return;
+      }
+      if (key === 'X') {
+        setVirtualAccidental('natural');
+        return;
+      }
+      if (key === 'C') {
+        setVirtualAccidental('sharp');
+        return;
+      }
+
+      // Qualidades: Q, W, E, R, T, Y, U
+      const qualityKeys: Record<string, ChordQuality> = {
+        Q: 'major',
+        W: 'minor',
+        E: 'dominant7',
+        R: 'major7',
+        T: 'minor7',
+        Y: 'diminished',
+        U: 'sus4',
+      };
+      if (qualityKeys[key]) {
+        setVirtualQuality(qualityKeys[key]);
+        return;
+      }
+
+      // Barra de espaço para disparar palhetada ou pulsar sustain
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (playModeRef.current === 'strum') {
+          triggerVirtualStrum();
+        } else {
+          soundEngine.setSustainedChord(currentNotes);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isVirtualMode, currentNotes, triggerVirtualStrum]);
+
+  // Loop de detecção e renderização a 60 FPS com Telemetria Integrada
+  useEffect(() => {
+    if (!cameraActive && !isVirtualMode) return;
 
     let animationId: number;
 
-    const renderLoop = () => {
+    const renderLoop = (time: number) => {
+      const now = performance.now();
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
-      if (video && canvas && video.readyState >= 2) {
+      // 1. Cálculo de FPS em janela deslizante de 1000ms
+      frameTimesRef.current.push(now);
+      while (frameTimesRef.current.length > 0 && frameTimesRef.current[0] < now - 1000) {
+        frameTimesRef.current.shift();
+      }
+      const currentFps = frameTimesRef.current.length;
+
+      // Modo Câmera Real
+      if (cameraActive && video && canvas && video.readyState >= 2) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
 
-          // 1. Limpa o canvas
+          // Limpa o canvas
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-          // 2. Executa a visão computacional
+          // Executa a visão computacional
           const detection: VisuChordDetectionResult | null = visionEngine.processVideoFrame(
             video,
-            performance.now()
+            now
           );
 
-          // 3. Desenha guias de zona de altura para acidentes (# / natural / ♭)
+          // Desenha guias de zona de altura para acidentes (# / natural / ♭)
           drawHeightZones(ctx, canvas.width, canvas.height);
 
           if (detection) {
@@ -264,7 +447,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             const notes = getChordNotes(detection.selectedRoot, detection.selectedQuality);
             setCurrentNotes(notes);
 
-            // 4. Desenha as mãos no canvas
+            // Desenha mãos no canvas
             if (detection.leftHand) {
               drawHandSkeleton(ctx, detection.leftHand.landmarks, canvas.width, canvas.height, '#06b6d4');
               const gInfo = AVAILABLE_GESTURES[detection.leftHand.detectedGesture];
@@ -292,7 +475,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
                 '#c084fc'
               );
 
-              // 5. Execução do Áudio (Sustentação vs Palhetada)
+              // Execução do Áudio (Sustentação vs Palhetada)
               if (playModeRef.current === 'sustain') {
                 const canSustain = Boolean(detection.leftHand && detection.rightHand);
                 if (canSustain) {
@@ -325,7 +508,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             }
           }
 
-          // 6. Desenha a onda de choque visual caso ativa
+          // Onda de choque visual
           if (shockwaveRef.current) {
             drawShockwave(ctx, shockwaveRef.current);
             shockwaveRef.current.radius += 12;
@@ -333,6 +516,111 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             if (shockwaveRef.current.alpha <= 0) {
               shockwaveRef.current = null;
             }
+          }
+
+          // Atualização de telemetria throttled (a cada 400ms para manter 60 FPS liso)
+          if (now - lastTelemetryUpdateRef.current > 400) {
+            lastTelemetryUpdateRef.current = now;
+            setTelemetry({
+              fps: currentFps,
+              neuralLatencyMs: detection?.inferenceTimeMs || visionEngine.getLastInferenceTime(),
+              audioLatencyMs: soundEngine.getAudioLatency(),
+            });
+          }
+        }
+      }
+
+      // Modo Playground Virtual (Sem Câmera)
+      else if (isVirtualMode && canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          if (canvas.width !== 1280 || canvas.height !== 720) {
+            canvas.width = 1280;
+            canvas.height = 720;
+          }
+
+          // Limpa o canvas
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          // Fundo holográfico sutil de grade cibernética
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.95)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Linhas de grade
+          ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
+          ctx.lineWidth = 1;
+          for (let x = 0; x < canvas.width; x += 80) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+          }
+          for (let y = 0; y < canvas.height; y += 60) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+          }
+
+          // Zonas de altura
+          drawHeightZones(ctx, canvas.width, canvas.height);
+
+          // Configuração de gestos ativa
+          const gestureConfig = visionEngine.getGestureConfig();
+          const leftGesture: GestureId = gestureConfig.leftHandNotes[virtualBaseNote] || 'one_finger';
+          const rightGesture: GestureId = gestureConfig.rightHandQualities[virtualQuality] || 'five_fingers';
+
+          // Animação sutil de flutuação senoidal
+          const floatOffset = Math.sin(time / 400) * 0.015;
+          const leftY = (virtualAccidental === 'sharp' ? 0.30 : virtualAccidental === 'flat' ? 0.70 : 0.50) + floatOffset;
+          const rightY = 0.50 + Math.cos(time / 400) * 0.015;
+
+          // Gera landmarks sintéticos
+          const leftLandmarks = generateSimulatedHandLandmarks(leftGesture, 'Left', 0.28, leftY);
+          const rightLandmarks = generateSimulatedHandLandmarks(rightGesture, 'Right', 0.72, rightY);
+
+          // Renderiza esqueleto da mão esquerda (Ciano)
+          drawHandSkeleton(ctx, leftLandmarks, canvas.width, canvas.height, '#06b6d4');
+          const leftInfo = AVAILABLE_GESTURES[leftGesture];
+          drawHandLabel(
+            ctx,
+            { x: 0.28, y: leftY },
+            canvas.width,
+            canvas.height,
+            `Tônica: ${formatNoteName(currentRoot)} (${virtualAccidental}) [${leftInfo?.emoji || ''} ${leftInfo?.name || ''}]`,
+            '#06b6d4'
+          );
+
+          // Renderiza esqueleto da mão direita (Púrpura)
+          drawHandSkeleton(ctx, rightLandmarks, canvas.width, canvas.height, '#c084fc');
+          const rightInfo = AVAILABLE_GESTURES[rightGesture];
+          drawHandLabel(
+            ctx,
+            { x: 0.72, y: rightY },
+            canvas.width,
+            canvas.height,
+            `Qualidade: ${CHORD_QUALITIES[virtualQuality].label} [${rightInfo?.emoji || ''} ${rightInfo?.name || ''}]`,
+            '#c084fc'
+          );
+
+          // Onda de choque
+          if (shockwaveRef.current) {
+            drawShockwave(ctx, shockwaveRef.current);
+            shockwaveRef.current.radius += 12;
+            shockwaveRef.current.alpha -= 0.05;
+            if (shockwaveRef.current.alpha <= 0) {
+              shockwaveRef.current = null;
+            }
+          }
+
+          // Telemetria virtual
+          if (now - lastTelemetryUpdateRef.current > 400) {
+            lastTelemetryUpdateRef.current = now;
+            setTelemetry({
+              fps: currentFps,
+              neuralLatencyMs: 0.2, // Latência nominal de simulação vetorial
+              audioLatencyMs: soundEngine.getAudioLatency(),
+            });
           }
         }
       }
@@ -342,16 +630,28 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
 
     animationId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animationId);
-  }, [cameraActive]);
+  }, [cameraActive, isVirtualMode, currentRoot, virtualAccidental, virtualQuality, virtualBaseNote]);
 
   const chordFullName = getChordFullName(currentRoot, currentQuality);
 
   return (
     <div className="relative w-full max-w-5xl mx-auto flex flex-col items-center gap-5">
-      {/* Banner de Erro caso ocorra */}
+      {/* Banner de Erro Resiliente com Atalho para Playground Virtual */}
       {errorMessage && (
-        <div className="w-full bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-xl text-sm text-center">
-          {errorMessage}
+        <div className="w-full bg-rose-500/15 border border-rose-500/40 text-rose-200 px-5 py-3.5 rounded-2xl text-sm flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <Radio className="w-5 h-5 text-rose-400 shrink-0 animate-pulse" />
+            <span>{errorMessage}</span>
+          </div>
+          {!isVirtualMode && (
+            <button
+              onClick={startVirtualPlayground}
+              className="px-4 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all shrink-0 flex items-center gap-1.5"
+            >
+              <Play className="w-3.5 h-3.5" />
+              Ativar Playground Virtual
+            </button>
+          )}
         </div>
       )}
 
@@ -362,18 +662,56 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
           ref={videoRef}
           playsInline
           muted
-          className={`w-full h-full object-cover transform -scale-x-100 ${cameraActive ? 'opacity-90' : 'opacity-0'}`}
+          className={`w-full h-full object-cover transform -scale-x-100 transition-opacity duration-300 ${
+            cameraActive ? 'opacity-90' : 'opacity-0'
+          }`}
         />
 
-        {/* Canvas Holográfico de Detecção (Não espelhado no DOM para manter o texto legível) */}
+        {/* Canvas Holográfico de Detecção */}
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full pointer-events-none"
         />
 
+        {/* Monitor de Telemetria em Tempo Real (Item 3) */}
+        {(cameraActive || isVirtualMode) && (
+          <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] font-mono select-none shadow-xl">
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${
+                telemetry.fps >= 50 
+                  ? 'bg-emerald-400 animate-pulse' 
+                  : telemetry.fps >= 30 
+                  ? 'bg-amber-400' 
+                  : 'bg-rose-400'
+              }`} />
+              <span className="font-bold text-white tracking-wide">{telemetry.fps}</span>
+              <span className="text-slate-400 text-[10px]">FPS</span>
+            </div>
+            <span className="text-slate-700">|</span>
+            <div className="flex items-center gap-1.5 text-slate-300">
+              <Activity className="w-3 h-3 text-cyan-400" />
+              <span className="text-slate-500">IA:</span>
+              <span className="text-cyan-300 font-semibold">{telemetry.neuralLatencyMs.toFixed(1)}ms</span>
+            </div>
+            <span className="text-slate-700">|</span>
+            <div className="flex items-center gap-1.5 text-slate-300">
+              <span className="text-slate-500">Áudio:</span>
+              <span className="text-purple-300 font-semibold">{telemetry.audioLatencyMs.toFixed(1)}ms</span>
+            </div>
+            {isVirtualMode && (
+              <>
+                <span className="text-slate-700">|</span>
+                <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[9px] font-bold uppercase tracking-wider">
+                  VIRTUAL
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
         {/* HUD de Acorde Atual (Holograma Central) */}
-        {cameraActive && (
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all">
+        {(cameraActive || isVirtualMode) && (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all z-20">
             <div className={`px-6 py-2 rounded-2xl border backdrop-blur-md shadow-2xl transition-all duration-150 ${
               lastStrumTriggered
                 ? 'bg-purple-600/60 border-purple-300 scale-110 shadow-[0_0_30px_rgba(192,132,252,0.8)]'
@@ -413,9 +751,9 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
           </div>
         )}
 
-        {/* Botão de Iniciar quando a Câmera estiver Desligada */}
-        {!cameraActive && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-sm p-6 text-center">
+        {/* Botão de Iniciar quando a Câmera e o Playground estiverem Desligados */}
+        {!cameraActive && !isVirtualMode && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-sm p-6 text-center z-10">
             <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-white shadow-2xl shadow-cyan-500/30 mb-6">
               <Camera className="w-10 h-10" />
             </div>
@@ -424,7 +762,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
               Pronto para criar música no ar?
             </h3>
             <p className="text-sm text-slate-400 max-w-md mb-8">
-              Ative sua webcam para que o MediaPipe rastreie os movimentos das suas mãos e gere acordes em tempo real.
+              Ative sua webcam para que o MediaPipe rastreie os movimentos das suas mãos ou experimente o Playground Virtual sem câmera.
             </p>
 
             <div className="flex flex-wrap gap-4 justify-center">
@@ -435,6 +773,15 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
               >
                 <Sparkles className="w-5 h-5" />
                 {modelLoading ? 'Carregando IA...' : 'Ativar Câmera & Áudio'}
+              </button>
+
+              <button
+                onClick={startVirtualPlayground}
+                className="px-6 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-cyan-300 font-semibold text-sm border border-cyan-500/30 hover:border-cyan-500/50 shadow-lg shadow-cyan-500/10 transition-all flex items-center gap-2"
+                title="Tocar sem câmera utilizando atalhos e simulação visual"
+              >
+                <Play className="w-4 h-4 text-cyan-400" />
+                Playground Virtual (Sem Câmera)
               </button>
 
               <button
@@ -451,40 +798,146 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
                   className="px-6 py-3.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 font-semibold text-sm border border-cyan-500/30 transition-all flex items-center gap-2"
                 >
                   <Settings2 className="w-4 h-4 text-cyan-400" />
-                  Personalizar Posições
+                  Mapeamentos
                 </button>
               )}
             </div>
           </div>
         )}
 
-        {/* Botão de Pausar / Parar Câmera no Canto */}
-        {cameraActive && (
-          <div className="absolute bottom-4 right-4 flex items-center gap-2">
+        {/* Botões Flutuantes de Ação no Canto Inferior Direito */}
+        {(cameraActive || isVirtualMode) && (
+          <div className="absolute bottom-4 right-4 flex items-center gap-2 z-20">
             <button
               onClick={() => {
                 if (playMode === 'sustain') {
                   soundEngine.setSustainedChord(currentNotes);
                   setIsHandsSustaining(true);
                 } else {
-                  soundEngine.strumChord(currentNotes);
+                  triggerVirtualStrum();
                 }
               }}
               className="px-4 py-2 rounded-xl bg-purple-600/80 hover:bg-purple-500 text-white font-bold text-xs backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5"
             >
               <Volume2 className="w-3.5 h-3.5" />
-              {playMode === 'sustain' ? 'Testar Sustain' : 'Tocar Acorde'}
+              {playMode === 'sustain' ? 'Pulsar Sustain' : 'Palhetar (Espaço)'}
             </button>
+
+            {isVirtualMode && (
+              <button
+                onClick={startCamera}
+                className="px-3 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 font-semibold text-xs backdrop-blur-md transition-all flex items-center gap-1.5"
+                title="Tentar inicializar a webcam"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Usar Câmera
+              </button>
+            )}
+
             <button
-              onClick={stopCamera}
+              onClick={() => {
+                if (cameraActive) stopCamera();
+                if (isVirtualMode) {
+                  soundEngine.stopSustainedChord();
+                  setIsVirtualMode(false);
+                }
+              }}
               className="p-2.5 rounded-xl bg-slate-900/80 hover:bg-red-500 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md transition-all"
-              title="Desativar câmera"
+              title={cameraActive ? 'Desativar câmera' : 'Sair da simulação'}
             >
               <CameraOff className="w-4 h-4" />
             </button>
           </div>
         )}
       </div>
+
+      {/* Controles Interativos Exclusivos do Playground Virtual (Item 4) */}
+      {isVirtualMode && (
+        <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+              <h4 className="text-sm font-bold text-white tracking-wide">
+                Controles do Playground Virtual
+              </h4>
+              <span className="text-[10px] text-slate-400">
+                (Use os botões na tela ou os atalhos do teclado)
+              </span>
+            </div>
+            <span className="text-xs font-mono text-cyan-400 font-semibold bg-cyan-500/10 px-2.5 py-0.5 rounded-full border border-cyan-500/20">
+              Espaço: {playMode === 'strum' ? 'Palhetar' : 'Sustentar'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Seletor de Tônica (1 a 7) */}
+            <div>
+              <span className="text-xs font-semibold text-slate-400 mb-1.5 block">
+                1. Tônica (Teclas 1 - 7):
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {NATURAL_NOTES.map((note, idx) => (
+                  <button
+                    key={note}
+                    onClick={() => setVirtualBaseNote(note)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                      virtualBaseNote === note
+                        ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
+                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                    }`}
+                  >
+                    {note} <span className="opacity-60 text-[10px]">({idx + 1})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Seletor de Acidente (Z, X, C) */}
+            <div>
+              <span className="text-xs font-semibold text-slate-400 mb-1.5 block">
+                2. Acidente (Teclas Z, X, C):
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {ACCIDENTALS.map((acc) => (
+                  <button
+                    key={acc.value}
+                    onClick={() => setVirtualAccidental(acc.value)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      virtualAccidental === acc.value
+                        ? 'bg-purple-500 text-white shadow-md shadow-purple-500/30'
+                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                    }`}
+                  >
+                    {acc.label} <span className="opacity-60 text-[10px]">({acc.shortcut})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Seletor de Qualidade (Q a U) */}
+            <div>
+              <span className="text-xs font-semibold text-slate-400 mb-1.5 block">
+                3. Qualidade do Acorde:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {QUALITIES.map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => setVirtualQuality(q)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      virtualQuality === q
+                        ? 'bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-md'
+                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                    }`}
+                  >
+                    {CHORD_QUALITIES[q].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Teclado Virtual Polifônico */}
       <VirtualPiano activeNotes={currentNotes} />

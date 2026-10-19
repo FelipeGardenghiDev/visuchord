@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎵</text></svg>">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#06b6d4" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>VisuChord — Instrumento Musical por Visão Computacional &amp; Gestos</title>
     <meta name="description" content="Toque acordes e crie harmonia musical no ar através da sua webcam com Google MediaPipe Hands e Tone.js no navegador." />
     <meta property="og:title" content="VisuChord — Instrumento Musical por Visão Computacional" />
@@ -13,5 +17,14 @@
   <body class="bg-slate-950 text-slate-100 antialiased selection:bg-cyan-500 selection:text-slate-950">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch((err) => {
+            console.warn('Falha no registro do Service Worker:', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>
