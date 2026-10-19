@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { visionEngine, type VisuChordDetectionResult } from '../lib/visionEngine';
 import { soundEngine } from '../lib/soundEngine';
+import { rhythmEngine } from '../lib/rhythmEngine';
 import { 
   getChordNotes, 
   getChordFullName, 
@@ -25,7 +26,8 @@ import {
   Activity, 
   Play, 
   RefreshCw,
-  Radio
+  Radio,
+  Sliders
 } from 'lucide-react';
 import type { PlayMode } from './ControlsHeader';
 
@@ -157,6 +159,47 @@ function drawShockwave(
   ctx.restore();
 }
 
+// Desenha o osciloscópio neon com a forma de onda do som em tempo real
+function drawOscilloscope(
+  ctx: CanvasRenderingContext2D,
+  wave: Float32Array,
+  w: number,
+  h: number
+) {
+  if (!wave || wave.length === 0) return;
+
+  let hasSignal = false;
+  for (let i = 0; i < wave.length; i++) {
+    if (Math.abs(wave[i]) > 0.005) {
+      hasSignal = true;
+      break;
+    }
+  }
+  if (!hasSignal) return;
+
+  ctx.save();
+  ctx.beginPath();
+  const sliceWidth = w / (wave.length - 1);
+  const centerY = h - 28;
+
+  for (let i = 0; i < wave.length; i++) {
+    const x = i * sliceWidth;
+    const y = centerY + wave[i] * 24;
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+
+  ctx.strokeStyle = 'rgba(6, 182, 212, 0.85)';
+  ctx.lineWidth = 2.5;
+  ctx.shadowColor = '#06b6d4';
+  ctx.shadowBlur = 12;
+  ctx.stroke();
+  ctx.restore();
+}
+
 const NATURAL_NOTES: NaturalNote[] = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const ACCIDENTALS: { value: Accidental; label: string; shortcut: string }[] = [
   { value: 'flat', label: '♭ Bemol', shortcut: 'Z' },
@@ -186,12 +229,14 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
   const [virtualBaseNote, setVirtualBaseNote] = useState<NaturalNote>('C');
   const [virtualAccidental, setVirtualAccidental] = useState<Accidental>('natural');
   const [virtualQuality, setVirtualQuality] = useState<ChordQuality>('major');
+  const [virtualFilterVal, setVirtualFilterVal] = useState<number>(0.75);
 
-  // Telemetria em tempo real (FPS, Latência Neural, Latência de Áudio)
+  // Telemetria em tempo real (FPS, Latência Neural, Latência de Áudio, Filtro Moog)
   const [telemetry, setTelemetry] = useState({
     fps: 60,
     neuralLatencyMs: 0,
     audioLatencyMs: 10,
+    filterCutoffHz: 8000,
   });
   const frameTimesRef = useRef<number[]>([]);
   const lastTelemetryUpdateRef = useRef<number>(0);
@@ -328,6 +373,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
   // Disparo manual no Modo Virtual (Strum)
   const triggerVirtualStrum = useCallback(() => {
     soundEngine.strumChord(currentNotes);
+    rhythmEngine.recordChord(currentNotes);
     setLastStrumTriggered(true);
     setTimeout(() => setLastStrumTriggered(false), 200);
 
@@ -347,7 +393,6 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
     if (!isVirtualMode) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignora atalhos se o foco estiver em input de texto
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
 
       const key = e.key.toUpperCase();
@@ -403,7 +448,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isVirtualMode, currentNotes, triggerVirtualStrum]);
 
-  // Loop de detecção e renderização a 60 FPS com Telemetria Integrada
+  // Loop de detecção e renderização a 60 FPS com Telemetria e Visualizador FFT
   useEffect(() => {
     if (!cameraActive && !isVirtualMode) return;
 
@@ -447,6 +492,12 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             const notes = getChordNotes(detection.selectedRoot, detection.selectedQuality);
             setCurrentNotes(notes);
 
+            // Modulação Expressiva Contínua: Altura da mão direita modula o filtro passa-baixas (Moog Cutoff)
+            if (detection.rightHand) {
+              const normHeight = 1 - Math.max(0.1, Math.min(0.9, detection.rightHand.handCenter.y));
+              soundEngine.setFilterCutoff(normHeight);
+            }
+
             // Desenha mãos no canvas
             if (detection.leftHand) {
               drawHandSkeleton(ctx, detection.leftHand.landmarks, canvas.width, canvas.height, '#06b6d4');
@@ -488,6 +539,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
                 setIsHandsSustaining((prev) => (prev ? false : prev));
                 if (detection.shouldTriggerStrum) {
                   soundEngine.strumChord(notes);
+                  rhythmEngine.recordChord(notes);
                   setLastStrumTriggered(true);
                   setTimeout(() => setLastStrumTriggered(false), 200);
 
@@ -518,13 +570,18 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             }
           }
 
-          // Atualização de telemetria throttled (a cada 400ms para manter 60 FPS liso)
+          // Visualizador FFT / Osciloscópio de Som
+          const wave = soundEngine.getWaveformData();
+          drawOscilloscope(ctx, wave, canvas.width, canvas.height);
+
+          // Atualização de telemetria throttled (a cada 400ms para manter 60 FPS)
           if (now - lastTelemetryUpdateRef.current > 400) {
             lastTelemetryUpdateRef.current = now;
             setTelemetry({
               fps: currentFps,
               neuralLatencyMs: detection?.inferenceTimeMs || visionEngine.getLastInferenceTime(),
               audioLatencyMs: soundEngine.getAudioLatency(),
+              filterCutoffHz: soundEngine.getFilterCutoff(),
             });
           }
         }
@@ -542,7 +599,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
           // Limpa o canvas
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-          // Fundo holográfico sutil de grade cibernética
+          // Fundo holográfico de grade cibernética
           ctx.fillStyle = 'rgba(2, 6, 23, 0.95)';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -613,13 +670,18 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             }
           }
 
+          // Visualizador FFT / Osciloscópio de Som
+          const wave = soundEngine.getWaveformData();
+          drawOscilloscope(ctx, wave, canvas.width, canvas.height);
+
           // Telemetria virtual
           if (now - lastTelemetryUpdateRef.current > 400) {
             lastTelemetryUpdateRef.current = now;
             setTelemetry({
               fps: currentFps,
-              neuralLatencyMs: 0.2, // Latência nominal de simulação vetorial
+              neuralLatencyMs: 0.2,
               audioLatencyMs: soundEngine.getAudioLatency(),
+              filterCutoffHz: soundEngine.getFilterCutoff(),
             });
           }
         }
@@ -673,7 +735,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
           className="absolute inset-0 w-full h-full pointer-events-none"
         />
 
-        {/* Monitor de Telemetria em Tempo Real (Item 3) */}
+        {/* Monitor de Telemetria e Desempenho em Tempo Real */}
         {(cameraActive || isVirtualMode) && (
           <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] font-mono select-none shadow-xl">
             <div className="flex items-center gap-1.5">
@@ -697,6 +759,12 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             <div className="flex items-center gap-1.5 text-slate-300">
               <span className="text-slate-500">Áudio:</span>
               <span className="text-purple-300 font-semibold">{telemetry.audioLatencyMs.toFixed(1)}ms</span>
+            </div>
+            <span className="text-slate-700">|</span>
+            <div className="flex items-center gap-1.5 text-slate-300">
+              <Sliders className="w-3 h-3 text-cyan-400" />
+              <span className="text-slate-500">Filtro:</span>
+              <span className="text-cyan-300 font-semibold">{(telemetry.filterCutoffHz / 1000).toFixed(1)}k</span>
             </div>
             {isVirtualMode && (
               <>
@@ -851,7 +919,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
         )}
       </div>
 
-      {/* Controles Interativos Exclusivos do Playground Virtual (Item 4) */}
+      {/* Controles Interativos Exclusivos do Playground Virtual */}
       {isVirtualMode && (
         <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -869,11 +937,11 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {/* Seletor de Tônica (1 a 7) */}
             <div>
               <span className="text-xs font-semibold text-slate-400 mb-1.5 block">
-                1. Tônica (Teclas 1 - 7):
+                1. Tônica (1 - 7):
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {NATURAL_NOTES.map((note, idx) => (
@@ -895,7 +963,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
             {/* Seletor de Acidente (Z, X, C) */}
             <div>
               <span className="text-xs font-semibold text-slate-400 mb-1.5 block">
-                2. Acidente (Teclas Z, X, C):
+                2. Acidente (Z, X, C):
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {ACCIDENTALS.map((acc) => (
@@ -934,6 +1002,34 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({ onOpenGuide, onOpenSetting
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Modulação Expressiva (Filtro Moog Cutoff) */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold text-slate-400 block">
+                  4. Filtro Moog:
+                </span>
+                <span className="text-[11px] font-mono text-cyan-400 font-bold">
+                  {(soundEngine.getFilterCutoff() / 1000).toFixed(1)} kHz
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={virtualFilterVal}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setVirtualFilterVal(val);
+                  soundEngine.setFilterCutoff(val);
+                }}
+                className="w-full accent-cyan-400 cursor-pointer h-2 bg-slate-800 rounded-lg"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                Na câmera, mova a mão direita para cima/baixo para modular o filtro no ar!
+              </span>
             </div>
           </div>
         </div>

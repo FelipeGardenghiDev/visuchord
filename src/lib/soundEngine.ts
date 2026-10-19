@@ -1,36 +1,45 @@
 import * as Tone from 'tone';
+import { midiEngine } from './midiEngine';
 
 export type InstrumentPreset = 'warmPad' | 'electricPiano' | 'ambientGuitar' | 'synthLead';
 
 class SoundEngine {
   private isInitialized = false;
   private polySynth: Tone.PolySynth | null = null;
+  private filter: Tone.Filter | null = null;
+  private filterCutoffHz = 8000;
   private reverb: Tone.Reverb | null = null;
   private chorus: Tone.Chorus | null = null;
   private limiter: Tone.Limiter | null = null;
   private volumeNode: Tone.Volume | null = null;
   private recorder: Tone.Recorder | null = null;
+  private analyser: Tone.Analyser | null = null;
   private recording = false;
   private activePreset: InstrumentPreset = 'warmPad';
   private currentlyPlayingNotes: string[] = [];
   private sustainedNotes: string[] = [];
 
   /**
-   * Inicializa o contexto de áudio do navegador
+   * Inicializa o contexto de áudio do navegador e a cadeia de efeitos
    */
   public async init(): Promise<void> {
     if (this.isInitialized) return;
 
     await Tone.start();
+    await midiEngine.init();
 
-    // Cria os nós de efeito e proteção contra distorção (Limiter)
+    // Volume Master e Limitador Brickwall (-1 dBFS)
     this.volumeNode = new Tone.Volume(-6).toDestination();
     this.limiter = new Tone.Limiter(-1).connect(this.volumeNode);
 
-    // Conecta o gravador de performance em paralelo com a saída de áudio
+    // Gravador e Analisador de Onda em tempo real
     this.recorder = new Tone.Recorder();
     this.volumeNode.connect(this.recorder);
 
+    this.analyser = new Tone.Analyser('waveform', 128);
+    this.volumeNode.connect(this.analyser);
+
+    // Efeitos Espaciais
     this.reverb = new Tone.Reverb({
       decay: 3.5,
       preDelay: 0.05,
@@ -46,7 +55,15 @@ class SoundEngine {
 
     this.chorus.start();
 
-    // Cria o sintetizador polifônico
+    // Filtro Passa-Baixas Moog-style para Modulação Expressiva
+    this.filter = new Tone.Filter({
+      frequency: this.filterCutoffHz,
+      type: 'lowpass',
+      rolloff: -24,
+      Q: 2,
+    }).connect(this.chorus);
+
+    // Sintetizador Polifônico conectado ao filtro
     this.polySynth = new Tone.PolySynth(Tone.Synth, {
       oscillator: {
         type: 'triangle',
@@ -57,7 +74,7 @@ class SoundEngine {
         sustain: 0.7,
         release: 1.2,
       },
-    }).connect(this.chorus);
+    }).connect(this.filter);
 
     this.applyPreset(this.activePreset);
     this.isInitialized = true;
@@ -72,6 +89,7 @@ class SoundEngine {
     try {
       this.currentlyPlayingNotes = notes;
       this.polySynth.triggerAttackRelease(notes, duration);
+      midiEngine.sendChordOn(notes);
     } catch (err) {
       console.warn('Erro ao tocar acorde:', err);
     }
@@ -91,6 +109,8 @@ class SoundEngine {
         const timeOffset = (index * speedMs) / 1000;
         this.polySynth?.triggerAttackRelease(note, '1.5n', now + timeOffset);
       });
+
+      midiEngine.sendChordOn(notes);
     } catch (err) {
       console.warn('Erro ao dedilhar acorde:', err);
     }
@@ -102,7 +122,6 @@ class SoundEngine {
   public setSustainedChord(notes: string[]): void {
     if (!this.isInitialized || !this.polySynth) return;
 
-    // Se as notas forem exatamente as mesmas, não faz nada para evitar re-ataque brusco
     const areEqual =
       this.sustainedNotes.length === notes.length &&
       this.sustainedNotes.every((n, i) => n === notes[i]);
@@ -121,6 +140,7 @@ class SoundEngine {
 
       this.sustainedNotes = [...notes];
       this.currentlyPlayingNotes = [...notes];
+      midiEngine.sendChordOn(notes);
     } catch (err) {
       console.warn('Erro ao sustentar acorde:', err);
     }
@@ -137,6 +157,7 @@ class SoundEngine {
       this.polySynth.releaseAll();
       this.sustainedNotes = [];
       this.currentlyPlayingNotes = [];
+      midiEngine.sendChordOff();
     } catch (err) {
       console.warn('Erro ao parar sustentação:', err);
     }
@@ -144,6 +165,35 @@ class SoundEngine {
 
   public isSustaining(): boolean {
     return this.sustainedNotes.length > 0;
+  }
+
+  /**
+   * Modula a frequência de corte do filtro passa-baixas (Moog-style filter cutoff)
+   * @param normalizedVal Valor normalizado de 0 a 1 (0 = escuro/250Hz, 1 = brilhante/14kHz)
+   */
+  public setFilterCutoff(normalizedVal: number): void {
+    const clamped = Math.max(0, Math.min(1, normalizedVal));
+    const minFreq = 250;
+    const maxFreq = 14000;
+    const freq = Math.round(minFreq * Math.pow(maxFreq / minFreq, clamped));
+    this.filterCutoffHz = freq;
+
+    if (this.filter) {
+      this.filter.frequency.rampTo(freq, 0.05);
+    }
+    midiEngine.sendControlChange(74, Math.round(clamped * 127));
+  }
+
+  public getFilterCutoff(): number {
+    return this.filterCutoffHz;
+  }
+
+  /**
+   * Retorna os dados da forma de onda do osciloscópio (128 amostras normalizadas entre -1 e +1)
+   */
+  public getWaveformData(): Float32Array {
+    if (!this.analyser) return new Float32Array(0);
+    return this.analyser.getValue() as Float32Array;
   }
 
   /**
@@ -160,53 +210,46 @@ class SoundEngine {
           envelope: { attack: 0.25, decay: 0.4, sustain: 0.8, release: 2.0 },
         });
         if (this.reverb) this.reverb.wet.value = 0.45;
+        if (this.chorus) this.chorus.wet.value = 0.4;
         break;
 
       case 'electricPiano':
         this.polySynth.set({
           oscillator: { type: 'fmsine', modulationType: 'triangle', harmonicity: 2 },
-          envelope: { attack: 0.02, decay: 0.8, sustain: 0.3, release: 1.2 },
+          envelope: { attack: 0.02, decay: 0.8, sustain: 0.3, release: 0.8 },
         });
         if (this.reverb) this.reverb.wet.value = 0.25;
+        if (this.chorus) this.chorus.wet.value = 0.55;
         break;
 
       case 'ambientGuitar':
         this.polySynth.set({
           oscillator: { type: 'triangle' },
-          envelope: { attack: 0.01, decay: 1.2, sustain: 0.1, release: 1.5 },
+          envelope: { attack: 0.015, decay: 1.2, sustain: 0.2, release: 1.5 },
         });
         if (this.reverb) this.reverb.wet.value = 0.5;
+        if (this.chorus) this.chorus.wet.value = 0.2;
         break;
 
       case 'synthLead':
         this.polySynth.set({
-          oscillator: { type: 'square' },
-          envelope: { attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.8 },
+          oscillator: { type: 'pulse', width: 0.4 },
+          envelope: { attack: 0.05, decay: 0.2, sustain: 0.6, release: 0.5 },
         });
         if (this.reverb) this.reverb.wet.value = 0.2;
+        if (this.chorus) this.chorus.wet.value = 0.25;
         break;
     }
   }
 
-  /**
-   * Ajusta o volume principal (em dB, de -40 a 0)
-   */
-  public setVolume(val: number): void {
+  public setVolume(db: number): void {
     if (this.volumeNode) {
-      this.volumeNode.volume.value = val;
+      this.volumeNode.volume.value = db;
     }
-  }
-
-  public getIsInitialized(): boolean {
-    return this.isInitialized;
   }
 
   public getCurrentlyPlayingNotes(): string[] {
     return this.currentlyPlayingNotes;
-  }
-
-  public isRecordingActive(): boolean {
-    return this.recording;
   }
 
   /**
