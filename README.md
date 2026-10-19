@@ -1,6 +1,7 @@
 # 🎵 VisuChord — Instrumento Musical por Visão Computacional & Gestos
 
 [![CI Pipeline](https://github.com/felipegardenghidev/visuchord/actions/workflows/ci.yml/badge.svg)](https://github.com/felipegardenghidev/visuchord/actions)
+![Tests](https://img.shields.io/badge/Tests-43%20Passing%20(Vitest)-brightgreen?style=flat-square)
 ![Vite](https://img.shields.io/badge/Vite-8.2-646CFF?style=flat-square&logo=vite)
 ![React](https://img.shields.io/badge/React-19-blue?style=flat-square&logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?style=flat-square&logo=typescript)
@@ -77,7 +78,10 @@ cd visuchord
 # 2. Instalar dependências
 pnpm install
 
-# 3. Rodar o servidor de desenvolvimento
+# 3. Rodar a suíte de testes automatizados (Vitest)
+pnpm test
+
+# 4. Rodar o servidor de desenvolvimento
 pnpm dev
 # Acesse http://localhost:5173 e permita o acesso à webcam
 ```
